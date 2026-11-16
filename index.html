@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mis Deudas - Línea de Tiempo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+        body { background: #111; color: #fff; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { text-align: center; color: #39ff14; margin-bottom: 30px; }
+        .form-box { background: #222; padding: 20px; border-radius: 10px; margin-bottom: 25px; }
+        h3 { margin-bottom: 12px; color: #39ff14; }
+        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: none; }
+        input { background: #333; color: #fff; border: 1px solid #555; width: 180px; }
+        button { background: #39ff14; color: #000; font-weight: bold; cursor: pointer; }
+        button.edit { background: #00ccff; }
+        button.del { background: #ff4444; color: #fff; }
+        button.cancel { background: #555; color: #fff; }
+        button.backup { background: #00ccff; }
+        button.restore { background: #ff9800; }
+        .chart-box { background: #222; padding: 20px; border-radius: 10px; margin-bottom: 25px; }
+        canvas { width: 100%; height: 400px; background: #000; border-radius: 5px; }
+        .list-box { background: #222; padding: 20px; border-radius: 10px; }
+        .item { padding: 12px; background: #333; margin: 8px 0; border-radius: 5px; border-left: 4px solid; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap:10px; }
+        .leyenda { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 15px; }
+        .leyenda span { display: flex; align-items: center; gap: 5px; font-size: 14px; }
+        .leyenda .dot { width: 12px; height: 12px; border-radius: 2px; }
+        .editando { color: #ff9800; margin: 8px 0; display: none; }
+        .backup-box { margin-top:15px; padding-top:10px; border-top: 1px solid #444; }
+        small { color: #aaa; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💰 Mis Deudas</h1>
+
+        <div class="form-box">
+            <h3 id="formTitulo">Agregar Deuda</h3>
+            <div id="avisoEditando" class="editando">✏️ Modo edición</div>
+            <input type="text" id="nombre" placeholder="Nombre / Concepto">
+            <input type="number" id="monto" placeholder="Monto $" step="0.01">
+            <input type="date" id="fechaInicio">
+            <input type="date" id="fechaFin">
+            <button onclick="guardar()">Guardar</button>
+            <button id="btnCancelar" class="cancel" style="display:none;" onclick="cancelar()">Cancelar</button>
+            
+            <div class="backup-box">
+                <small>💾 Respaldo de datos:</small><br>
+                <button class="backup" onclick="exportarDatos()">Descargar Respaldo</button>
+                <input type="file" id="archivoRespaldo" accept=".json" style="display:none;" onchange="importarDatos(event)">
+                <button class="restore" onclick="document.getElementById('archivoRespaldo').click()">Cargar Respaldo</button>
+            </div>
+        </div>
+
+        <div class="chart-box">
+            <canvas id="canvas"></canvas>
+            <div id="leyenda" class="leyenda"></div>
+        </div>
+
+        <div class="list-box">
+            <h3>Lista de Deudas</h3>
+            <div id="lista"></div>
+        </div>
+    </div>
+
+    <script>
+        const colores = ['#39ff14','#00ccff','#ff00cc','#ffff00','#ff9800','#ff4444','#9966ff'];
+        let deudas = JSON.parse(localStorage.getItem('deudas')) || [];
+        let editandoId = null;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function guardarStorage() {
+            localStorage.setItem('deudas', JSON.stringify(deudas));
+        }
+
+        function guardar() {
+            const nombre = document.getElementById('nombre').value.trim();
+            const monto = parseFloat(document.getElementById('monto').value);
+            const fi = document.getElementById('fechaInicio').value;
+            const ff = document.getElementById('fechaFin').value;
+
+            if (!nombre || !monto || !fi || !ff) {
+                alert('⚠️ Completa todos los campos');
+                return;
+            }
+
+            if (editandoId) {
+                const i = deudas.findIndex(d => d.id === editandoId);
+                deudas[i].nombre = nombre;
+                deudas[i].monto = monto;
+                deudas[i].fechaInicio = fi;
+                deudas[i].fechaFin = ff;
+                editandoId = null;
+                document.getElementById('formTitulo').textContent = 'Agregar Deuda';
+                document.getElementById('avisoEditando').style.display = 'none';
+                document.getElementById('btnCancelar').style.display = 'none';
+            } else {
+                deudas.push({ id: Date.now(), nombre, monto, fechaInicio: fi, fechaFin: ff, color: colores[deudas.length % colores.length] });
+            }
+
+            guardarStorage();
+            dibujar();
+            listar();
+            limpiar();
+        }
+
+        function editar(id) {
+            const d = deudas.find(x => x.id === id);
+            editandoId = id;
+            document.getElementById('formTitulo').textContent = '✏️ Editar Deuda';
+            document.getElementById('avisoEditando').style.display = 'block';
+            document.getElementById('btnCancelar').style.display = 'inline';
+            document.getElementById('nombre').value = d.nombre;
+            document.getElementById('monto').value = d.monto;
+            document.getElementById('fechaInicio').value = d.fechaInicio;
+            document.getElementById('fechaFin').value = d.fechaFin;
+        }
+
+        function cancelar() {
+            editandoId = null;
+            document.getElementById('formTitulo').textContent = 'Agregar Deuda';
+            document.getElementById('avisoEditando').style.display = 'none';
+            document.getElementById('btnCancelar').style.display = 'none';
+            limpiar();
+        }
+
+        function limpiar() {
+            document.getElementById('nombre').value = '';
+            document.getElementById('monto').value = '';
+            document.getElementById('fechaInicio').value = '';
+            document.getElementById('fechaFin').value = '';
+        }
+
+        function borrar(id) {
+            if (confirm('¿Eliminar esta deuda?')) {
+                deudas = deudas.filter(x => x.id !== id);
+                guardarStorage();
+                if (editandoId === id) cancelar();
+                dibujar();
+                listar();
+            }
+        }
+
+        function dibujar() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = 400;
+            const w = canvas.width;
+            const h = canvas.height;
+            const m = { t:40, r:40, b:50, l:60 };
+            const centroY = h/2;
+            ctx.clearRect(0,0,w,h);
+
+            if (!deudas.length) {
+                ctx.fillStyle = '#666';
+                ctx.font = '18px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Agrega una deuda arriba', w/2, h/2);
+                return;
+            }
+
+            const fMin = Math.min(...deudas.map(d => new Date(d.fechaInicio).getTime()));
+            const fMax = Math.max(...deudas.map(d => new Date(d.fechaFin).getTime()));
+            const minT = new Date(fMin - 15*24*60*60*1000);
+            const maxT = new Date(fMax + 15*24*60*60*1000);
+            const rango = maxT - minT;
+
+            function xPorFecha(fecha) {
+                return m.l + ((fecha - minT)/rango) * (w - m.l - m.r);
+            }
+
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(m.l, centroY);
+            ctx.lineTo(w - m.r, centroY);
+            ctx.stroke();
+
+            for (let i=0; i<=6; i++) {
+                const f = new Date(+minT + rango/6*i);
+                const x = xPorFecha(f);
+                ctx.fillStyle = '#888';
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(f.toLocaleDateString('es-AR'), x, centroY + 22);
+            }
+
+            const hoy = Date.now();
+            if (hoy >= minT && hoy <= maxT) {
+                const xHoy = xPorFecha(hoy);
+                ctx.strokeStyle = '#ff9800';
+                ctx.setLineDash([5,5]);
+                ctx.beginPath();
+                ctx.moveTo(xHoy, m.t);
+                ctx.lineTo(xHoy, h - m.b);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#ff9800';
+                ctx.fillText('HOY', xHoy, m.t - 5);
+            }
+
+            deudas.forEach((d, i) => {
+                const fi = new Date(d.fechaInicio).getTime();
+                const ff = new Date(d.fechaFin).getTime();
+                const x1 = xPorFecha(fi);
+                const x2 = xPorFecha(ff);
+                const dir = i%2===0 ? -1 : 1;
+                const amp = 45 + i*18;
+
+                ctx.strokeStyle = d.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                for (let p=0; p<=1; p+=0.01) {
+                    const x = x1 + (x2-x1)*p;
+                    const y = centroY + dir * amp * Math.sin(p * Math.PI);
+                    p===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+                }
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(x1, centroY, 4, 0, Math.PI*2);
+                ctx.fillStyle = d.color;
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(x2, centroY, 5, 0, Math.PI*2);
+                ctx.fillStyle = '#39ff14';
+                ctx.fill();
+            });
+        }
+
+        function listar() {
+            const lista = document.getElementById('lista');
+            const leyenda = document.getElementById('leyenda');
+
+            if (!deudas.length) {
+                lista.innerHTML = '<p style="color:#777;padding:10px;">Sin deudas guardadas</p>';
+                leyenda.innerHTML = '';
+                return;
+            }
+
+            lista.innerHTML = deudas.map(d => `
+                <div class="item" style="border-left-color:${d.color}">
+                    <div>
+                        <strong>${d.nombre}</strong> — $${d.monto}<br>
+                        <small>${new Date(d.fechaInicio).toLocaleDateString('es-AR')} → ${new Date(d.fechaFin).toLocaleDateString('es-AR')}</small>
+                    </div>
+                    <div>
+                        <button class="edit" onclick="editar(${d.id})">✏️ Editar</button>
+                        <button class="del" onclick="borrar(${d.id})">🗑️ Borrar</button>
+                    </div>
+                </div>
+            `).join('');
+
+            leyenda.innerHTML = deudas.map(d => `
+                <span><span class="dot" style="background:${d.color}"></span>${d.nombre}</span>
+            `).join('');
+        }
+
+        function exportarDatos() {
+            const datos = JSON.stringify(deudas, null, 2);
+            const blob = new Blob([datos], {type: 'application/json'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g,'-');
+            a.download = 'respaldo-deudas-' + fecha + '.json';
+            a.click();
+        }
+
+        function importarDatos(e) {
+            const archivo = e.target.files[0];
+            if (!archivo) return;
+            
+            const lector = new FileReader();
+            lector.onload = function(ev) {
+                try {
+                    const datosCargados = JSON.parse(ev.target.result);
+                    if (confirm('¿Reemplazar los datos actuales por este respaldo?\nSe guardará automáticamente.')) {
+                        deudas = datosCargados;
+                        guardarStorage();
+                        dibujar();
+                        listar();
+                        alert('✅ ¡Datos restaurados correctamente!');
+                    }
+                } catch(err) {
+                    alert('❌ Error al leer el archivo. Verifica que sea un respaldo válido.');
+                }
+                e.target.value = '';
+            };
+            lector.readAsText(archivo);
+        }
+
+        window.onload = function() {
+            dibujar();
+            listar();
+        };
+    </script>
+</body>
+</html>
